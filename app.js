@@ -10,11 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const themeIcon = document.getElementById('theme-icon');
     const body = document.body;
 
-    // Check for saved theme preference, otherwise fallback to system preference
+    // Start with light (bright) mode by default, unless they have explicitly saved dark mode
     const savedTheme = localStorage.getItem('theme');
-    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-    if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
+    if (savedTheme === 'dark') {
         enableDarkMode();
     } else {
         enableLightMode();
