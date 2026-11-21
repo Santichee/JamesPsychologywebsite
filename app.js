@@ -157,19 +157,28 @@ document.addEventListener('DOMContentLoaded', () => {
         'cigna',
         'united healthcare',
         'unitedhealthcare',
+        'united',
         'uhc',
         'oxford',
-        'oscar',
         'oscar health',
+        'oscar',
+        'anthem blue cross blue shield',
+        'anthem bcbs',
         'anthem',
+        'blue cross blue shield',
         'blue cross',
+        'bluecross',
         'blue shield',
-        'bcbs',
-        'anthem bcbs'
+        'blueshield',
+        'bcbs'
     ];
 
+    function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
     insuranceSearch.addEventListener('input', () => {
-        const query = insuranceSearch.value.trim().toLowerCase();
+        const query = insuranceSearch.value.trim().toLowerCase().replace(/\s+/g, ' ');
         
         if (!query) {
             checkerResult.className = 'checker-result';
@@ -177,14 +186,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Search for a match in our in-network array
+        // Match exact provider names, prefixes (3+ chars), or whole-word/phrase mentions
+        // so generic substrings like "health", "care", or "the" don't false-positive.
         const match = inNetworkInsurances.some(ins => {
-            if (query.length < 3) {
-                // For very short queries, only do exact matching or match complete words (e.g. "uhc")
-                return ins === query || ins.split(/\s+/).includes(query);
-            }
-            // For longer queries, match if the search term is a substring
-            return ins.includes(query) || query.includes(ins);
+            if (query === ins) return true;
+            if (query.length < 3) return false;
+            if (ins.startsWith(query)) return true;
+            return new RegExp(`(^|\\s)${escapeRegex(ins)}(\\s|$)`).test(query);
         });
 
         if (match) {
@@ -219,17 +227,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const generalError = document.getElementById('form-general-error');
     const generalErrorText = document.getElementById('general-error-text');
 
+    const contactPreferenceEl = document.getElementById('contact-preference');
+    const phoneInputEl = document.getElementById('client-phone');
+    const phoneLabelEl = document.getElementById('phone-label');
+    const phoneErrorEl = document.getElementById('phone-error');
+
     // Simple Email Validator
     function isValidEmail(email) {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     }
 
-    // Simple Phone Validator (optional, but must be numeric if entered)
+    function isPhoneRequired() {
+        const pref = contactPreferenceEl ? contactPreferenceEl.value : '';
+        return pref === 'phone' || pref === 'text';
+    }
+
+    function syncPhoneRequirementUI() {
+        const required = isPhoneRequired();
+        if (phoneInputEl) phoneInputEl.required = required;
+        if (phoneLabelEl) phoneLabelEl.classList.toggle('required-label', required);
+    }
+
+    // Phone Validator (required when Phone Call / Text Message is selected; must have 10+ digits if entered)
     function isValidPhone(phone) {
-        if (!phone) return true; // Phone is optional
-        // Stripping non-numeric characters to test length
+        if (!phone) {
+            if (isPhoneRequired()) {
+                if (phoneErrorEl) {
+                    phoneErrorEl.textContent = 'Please enter your phone number for your selected contact method.';
+                }
+                return false;
+            }
+            return true;
+        }
         const cleanNumber = phone.replace(/\D/g, '');
-        return cleanNumber.length >= 10;
+        if (cleanNumber.length < 10) {
+            if (phoneErrorEl) {
+                phoneErrorEl.textContent = 'Please enter a valid phone number.';
+            }
+            return false;
+        }
+        return true;
     }
 
     // Input blur handlers for dynamic feedback
@@ -242,6 +279,14 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 'client-message', errorId: 'message-error', check: val => val.trim().length > 0 }
     ];
 
+    function clearFieldError(inputEl, errorId) {
+        const group = inputEl.parentElement;
+        const errorEl = document.getElementById(errorId);
+        group.classList.remove('has-error');
+        inputEl.setAttribute('aria-invalid', 'false');
+        if (errorEl) errorEl.setAttribute('aria-hidden', 'true');
+    }
+
     fields.forEach(field => {
         const inputEl = document.getElementById(field.id);
         if (inputEl) {
@@ -250,15 +295,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             // Clear error on input change
             inputEl.addEventListener('input', () => {
-                const group = inputEl.parentElement;
-                group.classList.remove('has-error');
-                inputEl.setAttribute('aria-invalid', 'false');
+                clearFieldError(inputEl, field.errorId);
             });
             if (inputEl.tagName === 'SELECT') {
                 inputEl.addEventListener('change', () => {
-                    const group = inputEl.parentElement;
-                    group.classList.remove('has-error');
-                    inputEl.setAttribute('aria-invalid', 'false');
+                    clearFieldError(inputEl, field.errorId);
+                    if (field.id === 'contact-preference') {
+                        syncPhoneRequirementUI();
+                        if (!isPhoneRequired() && phoneInputEl && phoneInputEl.value.trim() === '') {
+                            clearFieldError(phoneInputEl, 'phone-error');
+                        }
+                    }
                 });
             }
         }
@@ -266,6 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function validateField(field) {
         const inputEl = document.getElementById(field.id);
+        const errorEl = document.getElementById(field.errorId);
         const group = inputEl.parentElement;
         const value = inputEl.value;
         
@@ -277,15 +325,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             group.classList.add('has-error');
             inputEl.setAttribute('aria-invalid', 'true');
+            if (errorEl) errorEl.setAttribute('aria-hidden', 'false');
             return false;
         } else {
-            group.classList.remove('has-error');
-            inputEl.setAttribute('aria-invalid', 'false');
+            clearFieldError(inputEl, field.errorId);
             return true;
         }
     }
 
-    contactForm.addEventListener('submit', (e) => {
+    contactForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         
         // Validate all fields
@@ -315,69 +363,71 @@ document.addEventListener('DOMContentLoaded', () => {
         btnIcon.className = 'fa-solid fa-spinner fa-spin btn-icon';
         if (generalError) generalError.style.display = 'none';
 
-        const clientName = document.getElementById('client-name').value;
-        const contactPreference = document.getElementById('contact-preference').value;
+        const clientName = document.getElementById('client-name').value.trim();
+        const contactPreference = contactPreferenceEl.value;
+        const fallbackErrorMsg = 'There was a problem sending your message. Please try again or call (347) 835-4967 directly.';
 
-        // Send actual email via FormSubmit API using JSON POST
-        fetch(contactForm.action || 'send_email.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            body: JSON.stringify({
-                Name: clientName,
-                Email: document.getElementById('client-email').value,
-                Phone: document.getElementById('client-phone').value,
-                Preference: contactPreference,
-                Support_Area: document.getElementById('interest-area').value,
-                Message: document.getElementById('client-message').value
-            })
-        })
-        .then(response => {
-            if (response.ok) {
-                // Set success screen information
-                successClientName.textContent = clientName;
-                successContactPref.textContent = contactPreference.toUpperCase();
-                
-                // Transition view with crossfade animations
-                contactForm.classList.add('form-fade-out');
-                
-                setTimeout(() => {
-                    contactForm.style.display = 'none';
-                    contactForm.classList.remove('form-fade-out');
-                    
-                    formSuccess.style.display = 'flex';
-                    formSuccess.offsetHeight; // force reflow
-                    formSuccess.classList.add('reveal');
-                    
-                    // Reset form inputs
-                    contactForm.reset();
-                    if (generalError) generalError.style.display = 'none';
-                }, 250);
-            } else {
-                return response.json().then(errData => {
-                    throw new Error(errData.message || "Failed to send email.");
-                }).catch(() => {
-                    throw new Error("There was a problem sending your message. Please try again or call (347) 835-4967 directly.");
-                });
+        try {
+            // Send actual email via FormSubmit API using JSON POST
+            const response = await fetch(contactForm.action, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    Name: clientName,
+                    Email: document.getElementById('client-email').value.trim(),
+                    Phone: phoneInputEl.value.trim(),
+                    Preference: contactPreference,
+                    Support_Area: document.getElementById('interest-area').value,
+                    Message: document.getElementById('client-message').value.trim(),
+                    _cc: 'nissagan.s@gmail.com',
+                    _subject: `New Website Inquiry from ${clientName}`
+                })
+            });
+
+            const data = await response.json().catch(() => null);
+            const isSuccess = response.ok && data && data.success !== false && data.success !== 'false';
+
+            if (!isSuccess) {
+                throw new Error((data && data.message) || fallbackErrorMsg);
             }
-        })
-        .catch(err => {
+
+            // Set success screen information
+            successClientName.textContent = clientName;
+            successContactPref.textContent = contactPreference.toUpperCase();
+            
+            // Transition view with crossfade animations
+            contactForm.classList.add('form-fade-out');
+            
+            setTimeout(() => {
+                contactForm.style.display = 'none';
+                contactForm.classList.remove('form-fade-out');
+                
+                formSuccess.style.display = 'flex';
+                formSuccess.offsetHeight; // force reflow
+                formSuccess.classList.add('reveal');
+                
+                // Reset form inputs and dynamic required state
+                contactForm.reset();
+                syncPhoneRequirementUI();
+                if (generalError) generalError.style.display = 'none';
+            }, 250);
+        } catch (err) {
             if (generalError && generalErrorText) {
-                generalErrorText.textContent = err.message || "Connection error. Please check your internet connection and try again.";
+                generalErrorText.textContent = err.message || 'Connection error. Please check your internet connection and try again.';
                 generalError.style.display = 'flex';
                 generalError.scrollIntoView({ behavior: 'smooth', block: 'center' });
             } else {
-                alert(err.message || "Connection error. Please try again.");
+                alert(err.message || 'Connection error. Please try again.');
             }
-        })
-        .finally(() => {
+        } finally {
             // Reset button state
             submitButton.disabled = false;
             submitButton.querySelector('span').textContent = originalBtnText;
             btnIcon.className = 'fa-solid fa-paper-plane btn-icon';
-        });
+        }
     });
 
     // Reset success screen back to form with transition
